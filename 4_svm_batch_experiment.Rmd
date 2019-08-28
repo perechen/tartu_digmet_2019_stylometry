@@ -19,7 +19,7 @@ library(gridExtra)
 
 ```{r, echo=FALSE, warning=F, message=F}
 ## build corpus
-files = list.files("news_data/", full.names = T)
+files = list.files("all-the-news/", full.names = T)
 
 
 ## reading csv files from data and combining tables together

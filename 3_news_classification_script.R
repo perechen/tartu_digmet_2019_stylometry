@@ -19,7 +19,7 @@ library(ggrepel)
 
 
 ### list files with path from folder
-files = list.files("news_data/", full.names = T)
+files = list.files("all-the-news/", full.names = T)
 
 ### read csv files from files and combine tables together (in loop)
 

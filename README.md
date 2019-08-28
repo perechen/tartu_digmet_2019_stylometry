@@ -13,4 +13,6 @@ Code description:
 3. Bruteforce lazy SVM for predicting political "bias" in media;
 4. Iterative SVM to check dispersion of results (loops are working better when running in .Rmd)  
   
- Slides include introduction to stylometry and distances & "stylo" package guide
+ Slides include introduction to stylometry and distances & "stylo" package guide  
+   
+ Also check [Tidy Text Mining workshop](https://github.com/peeter-t2/TM-TartuSummer2019) from Peeter Tinits!

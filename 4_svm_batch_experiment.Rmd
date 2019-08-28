@@ -1,0 +1,162 @@
+---
+title: "svm_batch_experiment"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(stylo)
+library(tidyverse)
+library(tidytext)
+library(gridExtra)
+```
+
+```{r, echo=FALSE, warning=F, message=F}
+## build corpus
+files = list.files("news_data/", full.names = T)
+
+
+## reading csv files from data and combining tables together
+all_news = c()
+
+for (i in files) {
+  all_news = rbind(all_news, read_csv(i))
+}
+
+news_politics = all_news %>% 
+  count(publication) %>% 
+  mutate(bias = c("LC", "FR", "LC", "LC", "L", "R","LC","R", "RC", "LC", "LC", "C", "L", "L", "LC")) %>% 
+  left_join(all_news) %>%
+# new name_id combining several variables
+  mutate(name_id = paste(id, publication, bias, sep="_")) %>%
+  select(-c(n, X1,date,month)) #remove some unused columns
+```
+
+```{r, echo=T, eval=T}
+news_politics = news_politics %>% 
+  mutate(length = nchar(content)/5) %>%
+  filter(length > 1000) 
+```
+
+```{r}
+svm_batch = function(iterations, mfw, samples_train, samples_test) {
+
+results = c()
+
+for (i in 1:iterations) {
+  # training set
+print(paste("Iteration number........", i))
+news_train = news_politics %>%
+  filter(bias %in% c("R", "L")) %>% #choose only R & L sources
+  group_by(bias) %>% # group by the bias variable
+  sample_n(samples_train) %>% # when grouped sample_n will take equal amount of samples from each variable type
+  mutate(set = "training") %>% # supply label to not lose info
+  ungroup()
+# test set
+news_test = news_politics %>%
+  filter(!bias %in% c("R", "L")) %>%
+  group_by(publication) %>%
+  sample_n(samples_test) %>%
+  mutate(set = "test") %>%
+  ungroup()
+
+# rank
+rank = news_train %>% bind_rows(news_test) %>%
+  unnest_tokens(word, content) %>% #unnest "content" column by words
+  filter(is.na(as.numeric(word))) %>% #filter numericals out
+  count(word,sort=T) # count all occurences of words across set and arrange by frequency
+
+#both DTMs
+
+dtm_train = news_train %>%
+  unnest_tokens(word, content) %>% # tokenize
+  filter(is.na(as.numeric(word))) %>% # filter numericals
+  count(word, name_id) %>% # count words WITHIN each document separately
+  group_by(name_id) %>%
+  mutate(n = n/sum(n)) %>% # get relative frequencies (% from the size). Because of "group_by" sum will only work for separate docs
+  ungroup() %>%
+  spread(key="word", value = "n", fill=0) # "spread" to "wide" table
+
+dtm_test = news_test %>%
+  unnest_tokens(word, content) %>%
+  filter(is.na(as.numeric(word))) %>% 
+  count(word, name_id) %>%
+  group_by(name_id) %>%
+  mutate(n = n/sum(n)) %>% # get relative frequencies (% from the size). Because of "group_by" sum() will only work for separate docs
+  ungroup() %>%
+  spread(key="word", value = "n", fill=0) 
+
+names_train = dtm_train[,1]
+names_test = dtm_test[,1]
+
+class_train = names_train %>%
+  separate(name_id, c("id", "publication", "bias"), sep="_")
+
+class_test = names_test %>%
+  separate(name_id, c("id", "publication", "bias"), sep="_")
+
+#reorder DTMs
+dtm_train = as.data.frame(scale(as.matrix(dtm_train[rank$word[1:mfw]])))
+dtm_test = as.data.frame(scale(as.matrix(dtm_test[rank$word[1:mfw]])))
+
+
+
+svm_results = perform.svm(dtm_train, # training set
+                          dtm_test,  # test set
+                          classes.training.set = class_train$bias, # training classes (which classes will be predicted)
+                          classes.test.set = class_test$publication, # test classes (which classes will be compared with predicted)
+                           svm.kernel = "linear", # standart SVM kernel is linear (hyperplane is a line)
+                          svm.degree = 3, #for polynomial kernel
+                          svm.coef0 = 0,  #for polynomial kernel
+                          svm.cost = 1) 
+
+results = rbind(results, as_tibble(attr(svm_results, "confusion_matrix")))
+
+
+
+  } # end of the loop
+ return(results)
+} # end of the function
+
+
+```
+
+```{r}
+svm_all = svm_batch(iterations = 20,
+                    mfw = 500,
+                    samples_train = 500,
+                    samples_test = 100)
+```
+
+```{r}
+# boxplots for distribution of results
+svm_all %>%
+  ggplot(aes(x=actual_classes, y=n/100)) + # aesthetics
+  geom_boxplot(aes(fill=predicted_classes)) + # use boxplot to represent the distribution of values / predictions
+  theme_classic() + # classics
+  scale_fill_manual(values=c("#666666", "#cc3300")) + # colors
+  facet_wrap(~predicted_classes) + # facet wrap to map R & L separately 
+  theme(axis.text.x = element_text(size=12,angle = 90, hjust = 1)) # some text adjustments
+```
+
+```{r}
+# mean predictions for L & R classes
+svm_all %>%
+  group_by(actual_classes, predicted_classes) %>% # grouping so that -> 
+  summarise(n = mean(n)) %>% # so that mean would be calculated for each MEDIA-PREDICTED_BIAS pair
+  ungroup() %>%
+  ggplot(aes(actual_classes, predicted_classes)) + # the familiar stuff
+  geom_point(aes(size=n/100,color=predicted_classes)) + 
+  scale_size_continuous(range = c(5, 20)) + 
+  theme_classic() +
+  scale_color_manual(values=c("#666666", "#cc3300")) +
+  guides(color=F) +
+  theme(axis.text.x = element_text(size=12,angle = 90, hjust = 1))
+```
+
